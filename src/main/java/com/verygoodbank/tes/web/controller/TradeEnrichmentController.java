@@ -1,5 +1,6 @@
 package com.verygoodbank.tes.web.controller;
 
+import java.io.BufferedInputStream;
 import java.io.FileNotFoundException;
 import java.io.IOException;
 import java.io.InputStream;
@@ -56,7 +57,8 @@ public class TradeEnrichmentController {
         AtomicLong wrongRecordsCount = new AtomicLong();
         Path tempStorePath = newTemporaryStorePath();
         
-        try (InputStreamReader isr = new InputStreamReader(file);
+        try (InputStream autoClosable = file;
+            InputStreamReader isr = new InputStreamReader(file);
             Scanner scanner = new Scanner(isr);            
             RandomAccessFile store = newTemporaryStore(tempStorePath);
             FileChannel channel = store.getChannel()) 
@@ -109,8 +111,11 @@ public class TradeEnrichmentController {
             logger.warn("Empty record at line {}", recordsCount);
         }  
         if (recordsCount % 1_000_000 == 0) {
-            logger.info("Currenly processed {} mln records, wall time is {} s", recordsCount/1_000_000, 
-                (System.currentTimeMillis()-startTime)/1000L);
+            long mlns = recordsCount/1_000_000;
+            long seconds = (System.currentTimeMillis()-startTime)/1000L;
+            double throughput = Math.round(100.0*mlns/seconds)/100.0;
+            logger.info("Currenly processed {} mln records, wall time is {}s, throughput {} mln/s",
+                mlns, seconds, throughput);
         }
         return true;
     }
