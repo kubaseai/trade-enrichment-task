@@ -1,16 +1,15 @@
 package com.verygoodbank.tes.service;
 
 import java.io.BufferedReader;
-import java.io.File;
-import java.io.FileInputStream;
+import java.io.InputStream;
 import java.io.InputStreamReader;
 import java.util.Optional;
 import java.util.concurrent.ConcurrentHashMap;
 
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
+import org.springframework.core.io.ClassPathResource;
 import org.springframework.stereotype.Service;
-import org.springframework.util.ResourceUtils;
 
 import com.verygoodbank.tes.model.Trade;
 
@@ -30,9 +29,9 @@ public class TradeEnrichmentService {
 
     public void readProductMap() {
         try {
-            File file = ResourceUtils.getFile("classpath:products.csv");
+            ClassPathResource file = new ClassPathResource("products.csv");
             ConcurrentHashMap<String,String> _productIdToNameMap = new ConcurrentHashMap<>();
-            try (FileInputStream fis = new FileInputStream(file); InputStreamReader isr = new InputStreamReader(fis);
+            try (InputStream fis = file.getInputStream(); InputStreamReader isr = new InputStreamReader(fis);
                 BufferedReader reader = new BufferedReader(isr)) {
                 String line = null;
                 while ((line = reader.readLine()) != null) {
