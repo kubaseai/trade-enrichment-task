@@ -50,3 +50,4 @@ or from any external integration by posting CVS lines matching schema: date,prod
 * Enable observability: Actuator/OpenTracing/OpenTelemetry.
 * Select better servlet runtime (Tomcat vs Jetty vs JBoss) when it comes to performance (highest throughput, lowest CPU and memory usage).
 * Perform static code analysis, vulnerability detection, make sure pom.xml contains up to date dependencies.
+* Fix code formatting, add method comments.
