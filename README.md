@@ -41,6 +41,7 @@ or from any external integration by posting CVS lines matching schema: date,prod
 * There is no HTTPS configured.
 * There is no (HTTP Basic) authorization.
 * There is no reloading of product id-name dictionary.
+* No clean-up of orphaned temporary files
 * Application wasn't prepared for GraalVM native build and there is no Dockerfile for building container.
 
 ## Ideas for improvement if there were more time available.
@@ -48,3 +49,4 @@ or from any external integration by posting CVS lines matching schema: date,prod
 * Plug in Your Kit Java Profiler to see if speed-up or more conservative memory usage is possible.
 * Enable observability: Actuator/OpenTracing/OpenTelemetry.
 * Select better servlet runtime (Tomcat vs Jetty vs JBoss) when it comes to performance (highest throughput, lowest CPU and memory usage).
+* Perform static code analysis, vulnerability detection, make sure pom.xml contains up to date dependencies.
