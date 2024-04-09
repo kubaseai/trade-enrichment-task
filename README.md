@@ -5,9 +5,13 @@ Streaming means that data is processed as it arrives, with minimal buffering, an
 RandomAccessFile with prepared result is streamed back to the caller.
 
 How to test:
-mvn spring-boot:run 
+```
+mvn spring-boot:run
+```
 in one console
+```
 curl --data-binary @src/test/resources/big-file-trade.csv --header 'Content-Type: text/csv' http://localhost:8080/api/v1/enrich >result.csv
+```
 in the other
 
 
