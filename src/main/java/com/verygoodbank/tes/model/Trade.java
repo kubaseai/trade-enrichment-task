@@ -1,23 +1,27 @@
 package com.verygoodbank.tes.model;
 
-import java.text.ParseException;
-import java.text.SimpleDateFormat;
 import java.time.DateTimeException;
 import java.time.LocalDate;
-import java.util.Calendar;
 
+import io.swagger.v3.oas.annotations.media.Schema;
+
+@Schema
 public class Trade {
     String sDate;
     String sProductId;
     String sProductName;
     String sCurrency;
     String sPrice;
-    boolean isLikelyHeader = false;
+    transient boolean isLikelyHeader = false;
 
     public static Trade fromCsvLine(String line, boolean mightBeHeader) throws ValidationException {
         if (line!=null && !line.isBlank()) {
+            // We give flexibility to the caller to include or skip csv header.
+            // As a result we must have some heuristics here to detect its presence.
+            // This detection is needed because we validate date and price.
+            boolean isLikelyHeader = line.chars().map( ch -> Character.isDigit(ch) ? 1 : 0).sum() == 0 &&
+                mightBeHeader;
             String values[] = line.split("\\,");
-            int isLikelyHeader = 0;
             if (values.length!=4) {
                 throw new ValidationException("Unexpected number of fields in trade record: "+
                     values.length+" vs 4", line);
@@ -25,23 +29,17 @@ public class Trade {
             Trade t = new Trade();
             t.sDate = values[0];
             if (!validateDate(t.sDate)) {
-                if (!mightBeHeader)
+                if (!isLikelyHeader)
                     throw new ValidationException("Invalid date format: "+t.sDate, line);
-                else
-                    isLikelyHeader++;
             }
             t.sProductId = values[1];
             t.sCurrency = values[2];
             t.sPrice = values[3];
             if (!validatePrice(t.sPrice)) {
-                if (!mightBeHeader)
+                if (!isLikelyHeader)
                     throw new ValidationException("Invalid price format: "+t.sPrice, line);
-                else
-                    isLikelyHeader++;
             }
-            if (isLikelyHeader==2 && mightBeHeader) {
-                t.isLikelyHeader = true;
-            }
+            t.isLikelyHeader = isLikelyHeader;
             return t;
         }
         return null;

@@ -18,7 +18,9 @@ import com.verygoodbank.tes.model.Trade;
 public class TradeEnrichmentService {
 
     public final static String ENRICHED_CSV_HEADER = "date,product_name,currency,price\r\n";
-    private final static String TXT_ON_MISSING = "Missing Product Name for ID=";
+    // Please note that this text is not compliant with requirements, but more sane
+    // when trying to reconcile product definitions between consumer and provider
+    public final static String TXT_ON_MISSING = "Missing Product Name for ID=";
     private final static Logger logger = LoggerFactory.getLogger(TradeEnrichmentService.class);
     private ConcurrentHashMap<String,String> productIdToNameMap = new ConcurrentHashMap<>();
 

@@ -11,14 +11,11 @@ import java.nio.channels.FileChannel;
 import java.nio.file.Files;
 import java.nio.file.Path;
 import java.util.Scanner;
-import java.util.concurrent.ExecutorService;
-import java.util.concurrent.Executors;
-import java.util.concurrent.TimeUnit;
 import java.util.concurrent.atomic.AtomicLong;
-import java.util.concurrent.atomic.AtomicReference;
 
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
+import org.springdoc.core.annotations.ParameterObject;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.http.HttpHeaders;
 import org.springframework.http.HttpStatus;
@@ -35,9 +32,23 @@ import com.verygoodbank.tes.model.Trade;
 import com.verygoodbank.tes.model.ValidationException;
 import com.verygoodbank.tes.service.TradeEnrichmentService;
 
+import io.swagger.v3.oas.annotations.OpenAPIDefinition;
+import io.swagger.v3.oas.annotations.Operation;
+import io.swagger.v3.oas.annotations.info.Info;
+import io.swagger.v3.oas.annotations.media.Content;
+import io.swagger.v3.oas.annotations.media.Schema;
+import io.swagger.v3.oas.annotations.parameters.RequestBody;
+import io.swagger.v3.oas.annotations.responses.ApiResponse;
+import io.swagger.v3.oas.annotations.responses.ApiResponses;
 import jakarta.servlet.ServletRequest;
 
 @RestController
+@OpenAPIDefinition(
+	info = @Info(
+		title = "Trade Encrichment Service",
+		version = "0.9"
+	)
+)
 @RequestMapping("api/v1")
 public class TradeEnrichmentController {
 
@@ -45,8 +56,21 @@ public class TradeEnrichmentController {
     @Autowired
     private TradeEnrichmentService tradeEnrichmentService;
        
-    @RequestMapping(value = "/enrich", method = RequestMethod.POST, produces = MediaType.TEXT_PLAIN_VALUE)
-	public ResponseEntity<StreamingResponseBody> enrichProduct(ServletRequest req, InputStream file) throws Exception {
+    @Operation(summary = "This operation accepts csv content with product lines: "+
+        "date,product_id,currency,price - to be enriched. Product Id is replaced with product description. "+
+        "Input content is validated. Wrong records are not enriched.")
+    @ApiResponses(value = { 
+	    @ApiResponse(responseCode = "200", description = "Enriched CSV file",
+	        content = { 
+                @Content(mediaType = "text/csv", schema = @Schema(defaultValue = "20240101,1,EUR,10.0"))
+            }
+        )
+    })
+    @RequestMapping(value = "/enrich", method = RequestMethod.POST, produces = "text/csv")
+	public ResponseEntity<StreamingResponseBody> enrichProduct(ServletRequest req,
+        @RequestBody String csv, InputStream file) throws Exception 
+    {
+        // please note that "String csv" above is a workaround for Swagger UI
 		if (req instanceof MultipartHttpServletRequest) {
 			MultipartHttpServletRequest multi = (MultipartHttpServletRequest)req;
 			MultipartFile multipartFile = multi.getFile("file");
@@ -67,9 +91,14 @@ public class TradeEnrichmentController {
             StringBuilder sb = new StringBuilder(4096);
             while (scanner.hasNextLine()) {
                 String line = scanner.nextLine();
-                processSingleRecord(line, ++recordsCount, wrongRecordsCount, channel, startTime, sb); 
+                if (++recordsCount==1) {
+                    // Always output the csv header.
+                    write(channel, TradeEnrichmentService.ENRICHED_CSV_HEADER);
+                }
+                processSingleRecord(line, recordsCount, wrongRecordsCount, channel, startTime, sb); 
             }
             long length = channel.position();
+            channel.force(false);
             StreamingResponseBody stream = newResponseStreaming(tempStorePath, length);
             HttpHeaders responseHeaders = new HttpHeaders();
             responseHeaders.add("Content-Length", length+"");
@@ -100,10 +129,8 @@ public class TradeEnrichmentController {
                 recordsCount, ve.getMessage(), ve.getContent());
             return false;
         }   
+        
         if (trade!=null && !trade.isLikelyHeader()) {
-            if (recordsCount==1) {
-                write(channel, TradeEnrichmentService.ENRICHED_CSV_HEADER);
-            }
             write(channel, tradeEnrichmentService.enrichTrade(trade).toCsvEnrichedLine(sb));
         }
         else {
