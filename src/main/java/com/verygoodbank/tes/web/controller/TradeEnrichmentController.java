@@ -4,6 +4,7 @@ import java.io.FileNotFoundException;
 import java.io.IOException;
 import java.io.InputStream;
 import java.io.InputStreamReader;
+import java.io.OutputStream;
 import java.io.RandomAccessFile;
 import java.nio.ByteBuffer;
 import java.nio.channels.FileChannel;
@@ -38,6 +39,7 @@ import io.swagger.v3.oas.annotations.parameters.RequestBody;
 import io.swagger.v3.oas.annotations.responses.ApiResponse;
 import io.swagger.v3.oas.annotations.responses.ApiResponses;
 import jakarta.servlet.ServletRequest;
+import jakarta.servlet.http.HttpServletResponse;
 
 @RestController
 @OpenAPIDefinition(
@@ -46,7 +48,7 @@ import jakarta.servlet.ServletRequest;
 		version = "0.9"
 	)
 )
-@RequestMapping("api/v1")
+@RequestMapping("/api/v1")
 public class TradeEnrichmentController {
 
     private final static Logger logger = LoggerFactory.getLogger(TradeEnrichmentController.class);
@@ -65,7 +67,7 @@ public class TradeEnrichmentController {
     })
     @RequestMapping(value = "/enrich", method = RequestMethod.POST, produces = "text/csv")
 	public ResponseEntity<StreamingResponseBody> enrichProduct(ServletRequest req,
-        @RequestBody String csv, InputStream file) throws Exception 
+        @RequestBody String csv, InputStream file, HttpServletResponse response) throws Exception 
     {
         // please note that "String csv" above is a workaround for Swagger UI
 		if (req instanceof MultipartHttpServletRequest) {
@@ -86,6 +88,8 @@ public class TradeEnrichmentController {
         {
             scanner.useDelimiter("[\\r]*[\\n]+");
             StringBuilder sb = new StringBuilder(4096);
+            response.setHeader("Content-Type", "text/csv");
+            response.setStatus(200);
             while (scanner.hasNextLine()) {
                 String line = scanner.nextLine();
                 if (++recordsCount==1) {
@@ -111,6 +115,94 @@ public class TradeEnrichmentController {
             logger.info("Processed {} records in {} ms, invalid count: {}", 
                 recordsCount, (endTime-startTime), wrongRecordsCount);
         }
+    }
+
+    @Operation(summary = "This operation accepts csv content with product lines: "+
+    "date,product_id,currency,price - to be enriched. Product Id is replaced with product description. "+
+    "Input content is validated. Wrong records are not enriched.")
+    @ApiResponses(value = { 
+        @ApiResponse(responseCode = "200", description = "Enriched CSV file",
+            content = { 
+                @Content(mediaType = "text/csv", schema = @Schema(defaultValue = "20240101,1,EUR,10.0"))
+            }
+        )
+    })
+    @RequestMapping(value = "/enrich-bidi", method = RequestMethod.POST, produces = "text/csv")
+    public  void enrichProductBidi(ServletRequest req,
+        @RequestBody String csv, InputStream file, HttpServletResponse response) throws Exception 
+    {
+        // please note that "String csv" above is a workaround for Swagger UI
+        if (req instanceof MultipartHttpServletRequest) {
+            MultipartHttpServletRequest multi = (MultipartHttpServletRequest)req;
+            MultipartFile multipartFile = multi.getFile("file");
+            if (multipartFile!=null) {
+                file = multipartFile.getInputStream();
+            }	
+        }
+        long startTime = System.currentTimeMillis();
+        long recordsCount = 0;
+        AtomicLong wrongRecordsCount = new AtomicLong();
+                
+        try (InputStream autoClosable = file;
+            InputStreamReader isr = new InputStreamReader(file);
+            Scanner scanner = new Scanner(isr);            
+            OutputStream channel = response.getOutputStream())        
+        {
+            scanner.useDelimiter("[\\r]*[\\n]+");
+            StringBuilder sb = new StringBuilder(4096);
+            response.setHeader("Content-Type", "text/csv");
+            response.setStatus(200);
+            while (scanner.hasNextLine()) {
+                String line = scanner.nextLine();
+                if (++recordsCount==1) {
+                    // Always output the csv header.
+                    write(channel, TradeEnrichmentService.ENRICHED_CSV_HEADER);
+                }
+                processSingleRecord(line, recordsCount, wrongRecordsCount, channel, startTime, sb); 
+            }        
+        }
+        catch (Exception e) {
+            logger.error("Enrichment failed. Current records count="+recordsCount, e);
+            response.setStatus(500);
+        }
+        finally {        
+            long endTime = System.currentTimeMillis();
+            logger.info("Processed {} records in {} ms, invalid count: {}", 
+                recordsCount, (endTime-startTime), wrongRecordsCount);
+        }
+    }
+
+    private boolean processSingleRecord(String line, long recordsCount, AtomicLong wrongRecordsCount,
+        OutputStream channel, long startTime, StringBuilder sb) throws IOException
+    {
+        Trade trade = null;
+        try {
+            trade = Trade.fromCsvLine(line, recordsCount==1);
+        }
+        catch (ValidationException ve) {
+            wrongRecordsCount.incrementAndGet();
+            logger.warn("Not processable record at line {} due to error: {}, content: \"{}\"",
+                recordsCount, ve.getMessage(), ve.getContent());
+            return false;
+        }   
+        
+        if (trade!=null && !trade.isLikelyHeader()) {
+            //logger.info(recordsCount+"|->");
+            write(channel, tradeEnrichmentService.enrichTrade(trade).toCsvEnrichedLine(sb));
+        }
+        else {
+            wrongRecordsCount.incrementAndGet();
+            logger.warn("Empty record at line {}", recordsCount);
+        }  
+        if (recordsCount % 1_000_000 == 0) {
+            long mlns = recordsCount/1_000_000;
+            long seconds = (System.currentTimeMillis()-startTime)/1000L;
+            double throughput = Math.round(100.0*mlns/seconds)/100.0;
+            logger.info("Currenly processed {} mln records, wall time is {}s, throughput {} mln/s",
+                mlns, seconds, throughput);
+        }
+        //logger.info(recordsCount+"->|");
+        return true;
     }
 
     private boolean processSingleRecord(String line, long recordsCount, AtomicLong wrongRecordsCount,
@@ -173,6 +265,10 @@ public class TradeEnrichmentController {
             }
         };
         return stream;
+    }
+
+    private void write(OutputStream channel, String s) throws IOException {
+        channel.write(s.getBytes());        
     }
 
     private void write(FileChannel channel, String s) throws IOException {
