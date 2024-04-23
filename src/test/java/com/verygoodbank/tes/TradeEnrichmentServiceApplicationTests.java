@@ -11,6 +11,7 @@ import java.util.List;
 import java.util.concurrent.ConcurrentLinkedQueue;
 import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
+import java.util.concurrent.LinkedBlockingQueue;
 import java.util.concurrent.TimeUnit;
 import java.util.stream.Collectors;
 
@@ -21,6 +22,7 @@ import org.springframework.boot.test.context.SpringBootTest.WebEnvironment;
 import org.springframework.boot.test.web.client.TestRestTemplate;
 import org.springframework.http.HttpEntity;
 import org.springframework.http.HttpMethod;
+import org.springframework.http.HttpStatusCode;
 
 import com.verygoodbank.tes.service.TradeEnrichmentService;
 
@@ -31,17 +33,26 @@ class TradeEnrichmentServiceApplicationTests {
     TestRestTemplate rest;
 
     private static boolean isBidi = System.getProperty("commMode", "").equalsIgnoreCase("bidi");
-    private static String lastTestName = "";
+    private static volatile String lastTestName = "";
+    private static long lastTestStart = System.currentTimeMillis();
+
     private final static Thread bgThread = new Thread() {
         public void run() {
             MemoryMXBean memBean = ManagementFactory.getMemoryMXBean();
+            String prevTestName = lastTestName;
             while (lastTestName!=null) {
                 long heapUsagePct = memBean.getHeapMemoryUsage().getUsed()*100/memBean.getHeapMemoryUsage().getMax();
                 long heapMB = memBean.getHeapMemoryUsage().getUsed()/1000_000;
                 long nonHeapMB = memBean.getNonHeapMemoryUsage().getUsed()/1000_000;
-                System.out.println("\n==========> "+lastTestName+"\nUsed heap: "+heapMB+"MB "+heapUsagePct+"%, other: "+nonHeapMB+"MB, bidi="+isBidi);
+                long duration = System.currentTimeMillis() - lastTestStart;
+                System.out.println("\n==========> "+lastTestName+"\nUsed heap: "+heapMB+"MB "+heapUsagePct+
+                    "%, other: "+nonHeapMB+"MB, bidi="+isBidi+", running "+duration+" ms");
                 try {
                     Thread.sleep(1000);
+                    if (!lastTestName.equals(prevTestName)) {
+                        prevTestName = lastTestName;
+                        lastTestStart = System.currentTimeMillis();
+                    }
                 } 
                 catch (InterruptedException e) {
                     break;
@@ -107,16 +118,25 @@ class TradeEnrichmentServiceApplicationTests {
     @Test
     public void test1mRecordsCanBeProcessedIn10s() throws Exception {
         enter("test1mRecordsCanBeProcessedIn10s");
-        String request = "20240229,1,EUR,10\r\n";
+        // run: mvn test -DargLine="-Xmx512m -DcommMode=bidi"
+        // to see bidi mode failure
+        String _request = "20240229,1,EUR,10\r\n";
         StringBuilder sb = new StringBuilder(1024*1024);
         for (int i=0; i < 1000_000; i++) {
-            sb.append(request);
+            sb.append(_request);
         }
-        request = sb.toString();
+        String request = sb.toString();
+        LinkedBlockingQueue<HttpStatusCode> responseQ = new LinkedBlockingQueue<>();
         long startTime = System.currentTimeMillis();
-        var resp = rest.exchange(uri(), HttpMethod.POST, new HttpEntity<>(request), String.class);
+        new Thread(() -> {
+            var resp = rest.exchange(uri(), HttpMethod.POST, new HttpEntity<>(request), String.class);
+            try {
+                responseQ.put(resp.getStatusCode());
+            } catch (InterruptedException e) {}
+        }).start();
+        HttpStatusCode resp = responseQ.poll(11, TimeUnit.SECONDS);
         long endTime = System.currentTimeMillis();
-        assertEquals(true, resp.getStatusCode().is2xxSuccessful());
+        assertEquals(true, resp!=null && resp.is2xxSuccessful());
         assertTrue(endTime - startTime <= 10000);
     }
 
